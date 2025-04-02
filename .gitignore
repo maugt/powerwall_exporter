@@ -14,6 +14,10 @@ powerwall_exporter
 *.so
 *.dylib
 
+# Emacs backups
+*~
+.#*
+
 # Test binary, built with `go test -c`
 *.test
 
@@ -22,3 +26,7 @@ powerwall_exporter
 
 # Dependency directories
 vendor/
+
+# Configuration files used to run the thing
+powerwall_cert.pem
+powerwall_exporter.yaml

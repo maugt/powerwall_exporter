@@ -1,0 +1,122 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: powerwall-exporter-config
+  # Consider adding a namespace: your-namespace
+data:
+  # Configuration file content
+  powerwall_exporter.yaml: |
+    web:
+      listen_address: "0.0.0.0:9871"
+      metrics_path: "/metrics"
+    device:
+      gateway_address: "192.168.2.166" # Ensure this is resolvable or use IP
+      login_email: "XX"
+      # Point to the file where the secret will be mounted
+      login_password: "XX"
+      # Point to the file where the cert from this ConfigMap will be mounted
+      tls_cert_file: "/etc/powerwall-config/powerwall_cert.pem"
+      retry_interval: "1s"
+      retry_timeout: "60s"
+
+  # Certificate file content (replace with your actual PEM content)
+  powerwall_cert.pem: |
+    -----BEGIN CERTIFICATE-----
+    -----END CERTIFICATE-----
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: powerwall-exporter
+  # Consider adding a namespace: your-namespace
+  labels:
+    app: powerwall-exporter
+    app.kubernetes.io/instance:  powerwall-exporter
+    app.kubernetes.io/name:      powerwall-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: powerwall-exporter
+  template:
+    metadata:
+      labels:
+        app: powerwall-exporter
+        release: monitoring
+        app.kubernetes.io/instance:  powerwall-exporter
+        app.kubernetes.io/name:      powerwall-exporter
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9871"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: powerwall-exporter
+        image: maugt/powerwall-exporter:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 9871
+          name: metrics
+        # This assumes the exporter looks for config file named 'powerwall_exporter.yaml'
+        # in the /etc/powerwall-config directory if specified via args,
+        # or in its working directory by default.
+        # Let's explicitly pass the config file path via args.
+        args:
+          - "--config.file=/etc/powerwall-config/powerwall_exporter.yaml"
+        volumeMounts:
+        # Mount the entire ConfigMap (config file + cert file) to /etc/powerwall-config
+        - name: config-volume
+          mountPath: /etc/powerwall-config
+          readOnly: true # ConfigMaps are inherently read-only when mounted like this
+        # Mount the Secret containing the password to /etc/powerwall-secrets
+        #- name: secret-volume
+        #  mountPath: /etc/powerwall-secrets
+        #  readOnly: true
+      volumes:
+      # Volume sourced from the ConfigMap
+      - name: config-volume
+        configMap:
+          name: powerwall-exporter-config # Must match ConfigMap metadata.name
+          # Define which items from the ConfigMap to mount and their filenames
+          items:
+            - key: powerwall_exporter.yaml
+              path: powerwall_exporter.yaml # Mounts as /etc/powerwall-config/powerwall_exporter.yaml
+            - key: powerwall_cert.pem
+              path: powerwall_cert.pem     # Mounts as /etc/powerwall-config/powerwall_cert.pem
+      # Volume sourced from the Secret
+      #- name: secret-volume
+      #  secret:
+      #    secretName: powerwall-exporter-secret # Must match Secret metadata.name
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: powerwall-exporter-service
+  # Consider adding a namespace: your-namespace
+  labels:
+    app: powerwall-exporter
+spec:
+  selector:
+    app: powerwall-exporter
+  ports:
+  - name: metrics
+    protocol: TCP
+    port: 9871
+    targetPort: 9871
+  type: ClusterIP
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  labels:
+    release: monitoring
+  name: tesla
+spec:
+  podMetricsEndpoints:
+  - port: metrics
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance:  powerwall-exporter
+      app.kubernetes.io/name:      powerwall-exporter
